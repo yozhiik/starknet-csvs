@@ -1,2 +1,4 @@
 *.csv
+*.ignore
 .DS_Store
+.vscode
