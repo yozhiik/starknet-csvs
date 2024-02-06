@@ -1,6 +1,6 @@
 # Description
-This is a very basic python tool to download transaction and transfer history from Voyager, written in python 3 by me. I am new to python so be nice.
-To use it, you'll just need the (free!) API key. Please fill out the form here requesting one and someone from Voyager will get back to you sharpish: https://forms.gle/34RE6d4aiiv16HoW6
+This is a very basic python tool to download transaction and transfer history from Voyager, written in python 3 by me. I am new to python so be nice.  
+To use it, you'll just need the (free!) API key. Please fill out the form here requesting one and someone from Voyager will get back to you sharpish: https://forms.gle/34RE6d4aiiv16HoW6  
 Voyager docs, for reference, are here: https://docs.voyager.online/#overview
 
 ## Features: 
@@ -16,9 +16,9 @@ Voyager docs, for reference, are here: https://docs.voyager.online/#overview
 - As fees end up paid with non-eth currencies like $strk when they start being used. The explorers' APIs will likely change, so need to keep an eye on this!
 
 # Setup
-just run:
+just run:  
 `python export-starknet.py [wallet address] [transactions / transfers] api_key`
-e.g. 
+e.g.  
 `python export-starknet.py test.stark transfers xyx0123fdsjfldskj`
-will generate 
-transfers_paper.stark_2024-02-06 21:26:00.552429.csv
+will generate  
+transfers_test.stark_2024-02-06 21:26:00.552429.csv
