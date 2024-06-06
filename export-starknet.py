@@ -1,6 +1,6 @@
 # import starknet transactions from Voyager
 import sys, argparse, requests, json, csv, configparser, re
-from datetime import datetime
+from datetime import datetime,timezone #imported timezone in order to apply rules needed after python version 3.16
 
 def get_stark_domain(domain):
     try:
@@ -101,7 +101,10 @@ wallet_address = args.wallet_address
 if re.search("stark", wallet_address):
     wallet_address = get_stark_domain(wallet_address)
 download_type=args.download_type
-f_name = download_type + "_" + fname_address + "_" + str(datetime.utcnow()) + ".csv"
+#process to grab date and avoid windows issues when creating files by replacing special characters included on the date
+file_created_time = str(datetime.now(timezone.utc)) 
+time_for_file_name = re.sub(r'[:+,.]',".",file_created_time) 
+f_name = download_type + "_" + fname_address + "_" + time_for_file_name + ".csv"
 api_key = args.api_key
 headers = {
     'Accept': 'application/json',
