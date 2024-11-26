@@ -1,5 +1,5 @@
 # import starknet transactions from Voyager
-import sys, argparse, requests, json, csv, configparser, re
+import os, sys, argparse, requests, json, csv, configparser, re
 from datetime import datetime,timezone #imported timezone in order to apply rules needed after python version 3.16
 
 def get_stark_domain(domain):
@@ -149,7 +149,7 @@ if format == 'koinly' and download_type == 'transactions': raise Exception("Koin
 #process to grab date and avoid windows issues when creating files by replacing special characters included on the date
 file_created_time = str(datetime.now(timezone.utc)) 
 time_for_file_name = re.sub(r'[:+,.]',".",file_created_time) 
-f_name = download_type + "_" + fname_address + "_" + time_for_file_name + ".csv"
+f_name = 'output' + os.sep + download_type + "_" + fname_address + "_" + time_for_file_name + ".csv"
 api_key = args.api_key
 headers = {
     'Accept': 'application/json',
