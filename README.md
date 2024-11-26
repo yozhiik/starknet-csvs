@@ -3,6 +3,7 @@ This is a very basic python tool to download transaction and transfer history fr
 Voyager updated the API since I wrote this earlier this year, so functionality may be limited. They also released a CSV download for ERC20s ('standard' cryptocurrencies) but that doesn't cover ERC721s (NFTs), so the latest update adds NFT transaction download support
 To use it, you'll just need the (free!) API key. Please fill out the form here requesting one and someone from Voyager will get back to you sharpish: https://forms.gle/34RE6d4aiiv16HoW6  
 Voyager docs, for reference, are here: https://docs.voyager.online/#overview
+Outputs to an output folder
 
 ## Features: 
 - outputs the timestamp in UTC
