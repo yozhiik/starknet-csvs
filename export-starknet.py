@@ -89,15 +89,32 @@ def koinly_format(page_data, koinly_fields):
     for row in page_data:
         koinly_datarow = {}
         koinly_datarow["Date"] = datetime.utcfromtimestamp(row["timestamp"]).strftime("%Y-%m-%d %H:%M UTC") # needs to be this format: 2018-01-03 14:25 UTC
+        token_symbol = row["tokenSymbol"] # may be invalid for koinly if not supported
+        tokeninfo = row["tokenAddress"]
+
+        if "tokenName" in row:
+            tokeninfo = row["tokenName"] or "" + " - " + tokeninfo
+        if "fromAlias" in row and "toAlias" in row:
+            tokeninfo = (row["fromAlias"] or "") + (row["toAlias"] or "") + " - " + tokeninfo
+
+        # split up LPs and NFTs
+        if token_symbol in starknet_unsupported_lp_currencies: # check through global list for LP tokens
+            koinly_datarow["Description"] = row["callName"] + " " + tokeninfo + " (starknet LP #"+ row["transferIds"][0] + ")"
+            token_symbol = "LP69"
+        else: # it's an NFT
+            if token_symbol in starknet_unsupported_nft_currencies:
+                token_symbol = "NFT69"
+            koinly_datarow["Description"] = row["callName"] + " " + tokeninfo + " (starknet nft)"
+
         # if download_type == "ERC721": row["tokenSymbol"] = 'NFT' + row['transferIds'][0] + " " + row["tokenSymbol"] # experimenting with this for Koinly integration, but it doesn't like it
         if row["in_or_out"] == "OUT":
             koinly_datarow["Sent Amount"] = row["transferValues"]
-            koinly_datarow["Sent Currency"] = row["tokenSymbol"]
+            koinly_datarow["Sent Currency"] = token_symbol
             koinly_datarow["Received Amount"] = 0
             koinly_datarow["Received Currency"] = 0
         elif row["in_or_out"] == "IN":
             koinly_datarow["Received Amount"] = row["transferValues"]
-            koinly_datarow["Received Currency"] = row["tokenSymbol"]
+            koinly_datarow["Received Currency"] = token_symbol
             koinly_datarow["Sent Amount"] = 0
             koinly_datarow["Sent Currency"] = 0
         fee = 0
@@ -107,12 +124,6 @@ def koinly_format(page_data, koinly_fields):
         koinly_datarow["Net Worth Amount"] = ""
         koinly_datarow["Net Worth Currency"] = ""
         koinly_datarow["Label"] = ""
-        tokeninfo = row["tokenAddress"] + "(starknet nft)"
-        if "tokenName" in row:
-            tokeninfo = row["tokenName"] or "" + " - " + tokeninfo
-        if "fromAlias" in row and "toAlias" in row:
-            tokeninfo = (row["fromAlias"] or "") + (row["toAlias"] or "") + " - " + tokeninfo
-        koinly_datarow["Description"] = row["callName"] + " " + tokeninfo + "(starknet nft)"
         koinly_datarow["TxHash"] = row["txHash"]
         koinly_array.append(koinly_datarow)
     return koinly_array
@@ -127,6 +138,8 @@ base_url = "https://api.voyager.online/beta"
 from_beginning_timestamp = 1633309200 # Starknet mainnet launch date, 4 Oct 2021
 convert_wei = True
 eth_contract = "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7"
+starknet_unsupported_lp_currencies = {"EkuPo", "JEDI-V2-POS"} # we'll iterate over these to see whether to update description
+starknet_unsupported_nft_currencies = {"PIXEL BANNERS", "INFAST", "INFCRW"} # we'll iterate over these to see whether to update description
 
 # set defaults
 
@@ -147,9 +160,9 @@ format = args.format
 # sanity check:
 if format == 'koinly' and download_type == 'transactions': raise Exception("Koinly needs to import ERC20 / ERC721 / ERC1155 transfers instead of transactions")
 #process to grab date and avoid windows issues when creating files by replacing special characters included on the date
-file_created_time = str(datetime.now(timezone.utc)) 
+file_created_time = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
 time_for_file_name = re.sub(r'[:+,.]',".",file_created_time) 
-f_name = 'output' + os.sep + download_type + "_" + fname_address + "_" + time_for_file_name + ".csv"
+f_name = 'output' + os.sep + download_type + "_" + fname_address + "_" + format + "_" + time_for_file_name + ".csv"
 api_key = args.api_key
 headers = {
     'Accept': 'application/json',
