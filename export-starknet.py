@@ -100,11 +100,15 @@ def koinly_format(page_data, koinly_fields):
         # split up LPs and NFTs
         if token_symbol in starknet_unsupported_lp_currencies: # check through global list for LP tokens
             koinly_datarow["Description"] = row["callName"] + " " + tokeninfo + " (starknet LP #"+ row["transferIds"][0] + ")"
-            token_symbol = "LP69"
+            if row["transferIds"][0] not in lp_list:
+                lp_list.append(row["transferIds"][0])
+            token_symbol = "LP" + str(initial_lp_counter + lp_list.index(row["transferIds"][0])) 
         else: # it's an NFT
             if token_symbol in starknet_unsupported_nft_currencies:
-                token_symbol = "NFT69"
-            koinly_datarow["Description"] = row["callName"] + " " + tokeninfo + " (starknet nft)"
+                if row["transferIds"][0] not in nft_list:
+                    nft_list.append(row["transferIds"][0])
+                token_symbol = "NFT" + str(initial_nft_counter + nft_list.index(row["transferIds"][0])) 
+            koinly_datarow["Description"] = row["callName"] + " " + tokeninfo + " - " + row["transferIds"][0] + " (starknet nft)"
 
         # if download_type == "ERC721": row["tokenSymbol"] = 'NFT' + row['transferIds'][0] + " " + row["tokenSymbol"] # experimenting with this for Koinly integration, but it doesn't like it
         if row["in_or_out"] == "OUT":
@@ -126,7 +130,20 @@ def koinly_format(page_data, koinly_fields):
         koinly_datarow["Label"] = ""
         koinly_datarow["TxHash"] = row["txHash"]
         koinly_array.append(koinly_datarow)
+    # now update indexes
+    overwrite_count_from_filename(lp_id_tracker_fname, initial_lp_counter + len(lp_list))
+    overwrite_count_from_filename(nft_id_tracker_fname, initial_nft_counter + len(nft_list))
     return koinly_array
+
+def get_count_from_filename(fname):
+    f = open(fname, "r")
+    return int(f.read())
+
+def overwrite_count_from_filename(fname, new_count):
+    f = open(fname, "w")
+    f.write(str(new_count))
+    f.close()
+    
 
 # "Date", "Sent Amount", "Sent Currency", "Received Amount", "Received Currency", "Fee Amount", "Fee Currency", "Net Worth Amount", "Net Worth Currency", "Label", "Description", "TxHash"
 
@@ -137,9 +154,15 @@ max_pages = 1000
 base_url = "https://api.voyager.online/beta"
 from_beginning_timestamp = 1633309200 # Starknet mainnet launch date, 4 Oct 2021
 convert_wei = True
+lp_id_tracker_fname = "last_used_lp_id.txt"
+nft_id_tracker_fname = "last_used_nft_id.txt"
 eth_contract = "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7"
 starknet_unsupported_lp_currencies = {"EkuPo", "JEDI-V2-POS"} # we'll iterate over these to see whether to update description
-starknet_unsupported_nft_currencies = {"PIXEL BANNERS", "INFAST", "INFCRW"} # we'll iterate over these to see whether to update description
+starknet_unsupported_nft_currencies = {"PIXEL BANNERS", "INFAST", "INFCRW", "ID", "BRVSTTNARMR", "STRKJOURSET"} # we'll iterate over these to see whether to update description
+initial_lp_counter = get_count_from_filename(lp_id_tracker_fname)
+initial_nft_counter = get_count_from_filename(nft_id_tracker_fname)
+lp_list = []
+nft_list = []
 
 # set defaults
 
@@ -149,6 +172,7 @@ parser.add_argument('-w', '--wallet', type=str, required=True)
 parser.add_argument('-t', '--type', type=str, choices=['ERC20','ERC721','ERC1155','transactions'], required=True)
 parser.add_argument('-a', '--api_key', type=str, required=True)
 parser.add_argument('-f','--format', type = str, default="verbose", choices=['verbose', 'standard', 'koinly'], required=False)
+#parser.add_argument('-s','--since', type = str, required=False) ## TO DO
 
 args=parser.parse_args()
 fname_address = args.wallet
