@@ -4,3 +4,7 @@
 .vscode
 .ignore/
 .env
+wallets.txt
+output/
+backup/
+log/
