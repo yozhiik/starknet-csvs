@@ -25,7 +25,7 @@ python3 starkscan-export.py --wallet=<0x address or name.stark> [options]
 | `-w` `--wallet` | | full 0x address or a `.stark` domain (resolved via starknet.id) |
 | `-l` `--wallets-file` | | path to a file listing one wallet per line (0x or .stark mixed freely, `#` comments and blank lines ignored); each wallet is exported to its own CSV. Pass exactly one of `--wallet` / `--wallets-file` |
 | `-t` `--type` | `all` | `all` (every token transfer), `ERC20`, `ERC721`, `ERC1155`, or `transactions` |
-| `-f` `--format` | `verbose` | `verbose` (every API field), `standard` (useful subset), `koinly` |
+| `-f` `--format` | `verbose` | `verbose` (every API field), `standard` (useful subset), `koinly`, or `all` (writes two files per wallet: koinly + verbose) |
 | `--from-date` | start of chain | inclusive start date `YYYY-MM-DD`, interpreted as 00:00:00 UTC |
 | `--to-date` | now | inclusive end date `YYYY-MM-DD`, interpreted as 23:59:59 UTC |
 | `-c` `--chain` | `SN_MAIN` | Starkscan chain id |
@@ -37,7 +37,7 @@ python3 starkscan-export.py --wallet=0xabc... --type=all --format=koinly --from-
 python3 starkscan-export.py --wallet=0xabc... --type=transactions --format=standard
 python3 starkscan-export.py --wallets-file=wallets.txt --format=koinly
 ```
-A `wallets.txt` template is included and gitignored (it's your personal address list - don't commit it). In batch mode a failing wallet is reported and skipped so it doesn't kill the rest; the script lists any failures at the end. Placeholder assignments are shared across all wallets in the batch, which is what you want if they all feed the same Koinly account.
+Create `wallets.txt` yourself (it's gitignored - it's your personal address list, never commit it). In batch mode a failing wallet is reported and skipped so it doesn't kill the rest; the script lists any failures at the end. Placeholder assignments are shared across all wallets in the batch, which is what you want if they all feed the same Koinly account.
 
 Output goes to `output/` next to the script; the filename records the wallet, type, format, date range and export time. Date filtering is done server-side by block range where the API supports it (transfers) and always re-trimmed client-side to exact UTC day boundaries.
 
@@ -54,20 +54,28 @@ Sanity check: `sum(Received) - sum(Sent) - sum(Fees)` for ETH from the exported 
 
 ### NFTs and LP positions
 Koinly custom files still cannot import NFTs directly - their only supported route is placeholder currencies, so the script does that automatically:
+- **beware**: Starkscan's transfer feed misclassifies some NFT collections as ERC20 with the token id in the amount field (single-felt Transfer events, e.g. Ekubo positions), and carries no name/symbol for others. The script fixes the collections listed in `KNOWN_NFT_CONTRACTS`, merged with your own additions in `nft_contracts_local.txt` (gitignored; lines of `address,kind,name` with kind `nft` or `lp`). When a run meets a no-metadata contract it prints a NOTE listing the address - add it to the local file if it's an NFT/LP collection, then re-run
 - every unique NFT (keyed on contract **and** token id) gets its own `NFTx` placeholder; Koinly documents a hard limit of 5000 and each placeholder must only ever track a single NFT
 - LP position NFTs (detected via Starkscan's action classification plus a symbol list: Ekubo, JediSwap v2) get `LPx` placeholders instead, so liquidity in/out legs match up. Koinly doesn't document an LP placeholder limit; the script warns past 1000
-- assignments persist in `log/koinly_placeholder_map.json` so re-runs and future exports always give the same NFT the same placeholder. **Keep this file.** On first run it seeds its counters from the old script's `last_used_*.txt` files (checking the repo root and `output/`, taking the highest), so numbering continues after placeholders you've already imported into Koinly rather than reusing them
+- assignments persist in `state/koinly_placeholder_map.json` so re-runs and future exports always give the same NFT the same placeholder. **Keep this file.** On first run it seeds its counters from the old script's `last_used_*.txt` files (checking the repo root and `output/`, taking the highest), so numbering continues after placeholders you've already imported into Koinly rather than reusing them
 - the NFT's real name, contract, and token id are recorded in the Description column
 
 ### Run log and undo
-Every export appends an entry to `log/koinly_run_log.json` (the `log/` folder is gitignored - it contains your wallet addresses): human-readable run date, wallet, type/format, date range, rows written, output filename, and - for koinly runs - the placeholder counters before/after plus exactly which new placeholders were assigned to which NFT. It doubles as a simple database of what you've imported and when.
+Every export appends an entry to `state/koinly_run_log.json` (the `state/` folder is gitignored - it contains your wallet addresses): human-readable run date, wallet, type/format, date range, rows written, output filename, and - for koinly runs - the placeholder counters before/after plus exactly which new placeholders were assigned to which NFT. It doubles as a simple database of what you've imported and when.
 
-Ran a test you want to take back? `python3 starkscan-export.py --undo-last` reverts the most recent run's placeholder assignments and counters (repeat to step further back). It reminds you which CSV to delete; it obviously can't un-import anything already uploaded to Koinly.
+Ran something you want to take back? Two forms, both of which only revert placeholder/counter bookkeeping (they remind you which CSVs to delete, and can't un-import anything already uploaded to Koinly):
+- `--undo` - revert whatever the last invocation did, whether that was one wallet or a whole `--wallets-file` batch (each invocation stamps its runs with a shared batch id, so batches unwind atomically)
+- `--undo-last [N]` - surgical form: revert exactly the last run, or the last N runs (also the fallback for log entries written before batch ids existed)
 
-The two files in `log/` are the ones worth backing up privately - they have no git safety net, and losing the placeholder map after real imports would scramble NFT numbering.
+The two files in `state/` are the ones worth backing up privately - they have no git safety net, and losing the placeholder map after real imports would scramble NFT numbering.
 
 ### Unknown tokens
-Tokens Starkscan has no metadata for (usually scam airdrops) are exported as `UNKNOWN:<contract address>` so each stays a distinct currency instead of merging into one; Koinly may ask you to map these on import, or you can delete those rows if they're junk. If token decimals are unknown the raw integer amount is exported and flagged in the Description.
+For contracts Starkscan has no metadata for, the script interrogates the chain directly via your RPC endpoint (cached across runs in `state/contract_names_cache.json`):
+- `name()`/`symbol()` for display. Self-reported symbols are exported address-qualified (`SPEPE:<contract address>`) so a scam token can never impersonate a real one or merge with a same-symbol contract
+- `decimals()` answering proves it behaves like an ERC20 - and provides the decimals, so amounts scale correctly
+- `owner_of(<a transferred id>)` answering proves it's an NFT - the transfer is then handled with placeholders automatically, routed to LP placeholders when the collection name contains "position"
+
+Contracts where nothing answers (e.g. NFTs that were since burned, like unstake receipts or migrated sets) show up as `UNDETERMINED` in the run's NOTE - those are the only ones needing a manual line in `nft_contracts_local.txt`.
 
 ### Importing tips
 - import with `--type=all`: filtering to `ERC721`/`ERC1155` drops the ERC20 legs of NFT trades and all fees (the script warns about this)

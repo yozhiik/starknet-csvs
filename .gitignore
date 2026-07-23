@@ -7,4 +7,9 @@
 wallets.txt
 output/
 backup/
-log/
+state/
+nft_contracts_local.txt
+*.env
+.env.*
+*~
+*.swp
