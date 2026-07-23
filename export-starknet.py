@@ -11,8 +11,10 @@ def get_stark_domain(domain):
         raise Exception("no address found for "+domain+" using starknet api")
 
 def check_api_valid(page_data):
-    if "message" in page_data:
-        raise Exception('Voyager API not valid, error returned "'+page_data['message']+'".\nRequest a free API key from the team here: https://forms.gle/34RE6d4aiiv16HoW6\nDocs here: https://docs.voyager.online/#overview')
+    # gateway errors come back as either "message" or "Message"
+    if "message" in page_data or "Message" in page_data:
+        error_msg = page_data.get("message") or page_data.get("Message")
+        raise Exception('Voyager API not valid, error returned "'+error_msg+'".\nRequest a free API key from the team here: https://forms.gle/34RE6d4aiiv16HoW6\nDocs here: https://docs.voyager.online/#overview')
 
 def convert_wei_to_eth(wei_val):
     return float(int(wei_val)*0.000000000000000001)
