@@ -71,11 +71,13 @@ The two files in `state/` are the ones worth backing up privately - they have no
 
 ### Unknown tokens
 For contracts Starkscan has no metadata for, the script interrogates the chain directly via your RPC endpoint (cached across runs in `state/contract_names_cache.json`):
-- `name()`/`symbol()` for display. Self-reported symbols are exported address-qualified (`SPEPE:<contract address>`) so a scam token can never impersonate a real one or merge with a same-symbol contract
+- `name()`/`symbol()` for display (recorded in the Description column)
 - `decimals()` answering proves it behaves like an ERC20 - and provides the decimals, so amounts scale correctly
 - `owner_of(<a transferred id>)` answering proves it's an NFT - the transfer is then handled with placeholders automatically, routed to LP placeholders when the collection name contains "position"
 
-Contracts where nothing answers (e.g. NFTs that were since burned, like unstake receipts or migrated sets) show up as `UNDETERMINED` in the run's NOTE - those are the only ones needing a manual line in `nft_contracts_local.txt`.
+In the koinly format, fungible tokens that koinly doesn't list (protocol receipt tokens like zETH/vTokens, scam airdrops, etc.) can't use their real symbols - koinly rejects unmatchable currencies with "Currency not found". They get `NULLx` placeholder currencies instead, one per contract, persisted in the placeholder map like NFTs, with the real name/symbol/contract in the Description. If koinly *does* list a token (e.g. DAI, LORDS), map its contract in `koinly_symbols_local.txt` (gitignored; lines of `address,koinly_currency`, where the currency is a symbol or `ID:1234` from the koinly Markets page url) and it will be exported under that currency with real price data.
+
+Contracts where nothing answers on-chain (e.g. NFTs that were since burned, like unstake receipts or migrated sets) show up as `UNDETERMINED` in the run's NOTE - those are the only ones needing a manual line in `nft_contracts_local.txt`.
 
 ### Importing tips
 - import with `--type=all`: filtering to `ERC721`/`ERC1155` drops the ERC20 legs of NFT trades and all fees (the script warns about this)

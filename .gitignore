@@ -13,3 +13,4 @@ nft_contracts_local.txt
 .env.*
 *~
 *.swp
+koinly_symbols_local.txt

@@ -53,6 +53,25 @@ KNOWN_NFT_CONTRACTS = {  # address: (name, "nft"|"lp") - widely-used position NF
     "0x469b656239972a2501f2f1cd71bf4e844d64b7cae6773aa84c702327c476e5b": ("JediSwap V2 Positions NFT", "lp"),
 }
 LOCAL_NFT_CONTRACTS_FNAME = os.path.join(SCRIPT_DIR, "nft_contracts_local.txt")
+# tokens koinly DOES list can be mapped to their koinly currency (symbol or ID:1234 form)
+# here instead of getting a NULLx placeholder - lines of: address,koinly_currency
+KOINLY_SYMBOLS_LOCAL_FNAME = os.path.join(SCRIPT_DIR, "koinly_symbols_local.txt")
+
+
+def load_koinly_symbol_overrides():
+    overrides = {}
+    if os.path.exists(KOINLY_SYMBOLS_LOCAL_FNAME):
+        with open(KOINLY_SYMBOLS_LOCAL_FNAME) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                addr, _, currency = line.partition(",")
+                overrides[int(addr.strip(), 16)] = currency.strip()
+    return overrides
+
+
+KOINLY_SYMBOL_OVERRIDES = load_koinly_symbol_overrides()
 # on-chain lookups for contracts starkscan has no metadata for, cached across runs.
 # selectors are starknet_keccak of the entrypoint names (verified against pycryptodome)
 NAME_CACHE_FNAME = os.path.join(SCRIPT_DIR, "state", "contract_names_cache.json")
@@ -358,9 +377,12 @@ def process_transactions(items):
 def load_placeholder_map():
     if os.path.exists(PLACEHOLDER_MAP_FNAME):
         with open(PLACEHOLDER_MAP_FNAME) as f:
-            return json.load(f)
+            state = json.load(f)
+        state.setdefault("null", {})  # NULLx placeholders added after early versions of the map
+        state.setdefault("next_null", 1)
+        return state
     # first run: seed counters from the old voyager script's tracker files if present
-    state = {"nft": {}, "lp": {}, "next_nft": 1, "next_lp": 1}
+    state = {"nft": {}, "lp": {}, "null": {}, "next_nft": 1, "next_lp": 1, "next_null": 1}
     for fnames, counter in ((LEGACY_NFT_COUNTER_FNAMES, "next_nft"), (LEGACY_LP_COUNTER_FNAMES, "next_lp")):
         for fname in fnames:
             if os.path.exists(fname):
@@ -381,10 +403,11 @@ def save_placeholder_map(state):
 
 
 def nft_placeholder(state, kind, token_address, token_id):
-    # koinly can only track NFTs via NFT1..NFT5000 / LP placeholder currencies, one per unique NFT.
-    # key on contract+id (token ids alone collide across collections) and persist the mapping
-    # so the same NFT gets the same placeholder on every run
-    key = token_address + ":" + str(token_id)
+    # koinly can only track unsupported assets via placeholder currencies: NFT1..NFT5000 /
+    # LPx (one per unique NFT/position) and NULLx (one per unsupported fungible token).
+    # NFTs key on contract+id (token ids alone collide across collections); fungibles key on
+    # the contract alone. the mapping persists so every run uses the same placeholders
+    key = token_address if kind == "null" else token_address + ":" + str(token_id)
     if key not in state[kind]:
         state[kind][key] = kind.upper() + str(state["next_" + kind])
         state["next_" + kind] += 1
@@ -401,14 +424,17 @@ def is_fee_row(row):
 
 def build_koinly_row(row, state):
     is_nft = row["tokenId"] != "" or row["standard"].upper() in ("ERC721", "ERC1155")
-    symbol = row["tokenSymbol"]
-    if not symbol:
-        # koinly's SYMBOL:ADDRESS syntax keeps each unknown token distinct instead of
-        # merging every unnamed (usually scam airdrop) token into one currency
-        symbol = "UNKNOWN:" + row["tokenAddress"]
-    elif row.get("symbolFromChain") and not is_nft:
-        # self-reported symbol: keep it address-qualified so it can't impersonate a real token
-        symbol = symbol + ":" + row["tokenAddress"]
+    symbol = row["tokenSymbol"] or "UNKNOWN"
+    override = KOINLY_SYMBOL_OVERRIDES.get(norm_addr(row["tokenAddress"]))
+    fungible_placeholder = None
+    if not is_nft:
+        if override:
+            symbol = override  # user says koinly lists this token as that currency
+        elif row.get("symbolFromChain") or not row["tokenSymbol"]:
+            # koinly rejects currencies it can't match ("Currency not found"), so tokens it
+            # doesn't list get a NULLx placeholder, one per contract. map the contract to a
+            # real koinly currency in koinly_symbols_local.txt if koinly does list it
+            fungible_placeholder = True
     description = " ".join(x for x in (row["actionLabel"] or row["actionKind"], row["protocolName"]) if x)
     if not row["tokenDecimals"] and not is_nft:
         description += " (token decimals unknown, amount is raw)"
@@ -420,6 +446,10 @@ def build_koinly_row(row, state):
         symbol = placeholder
     else:
         description += " " + tokeninfo
+        if fungible_placeholder:
+            placeholder = nft_placeholder(state, "null", row["tokenAddress"], "")
+            description += " (" + symbol + " as " + placeholder + ", not listed on koinly)"
+            symbol = placeholder
     koinly_datarow = {
         "Date": row["utcTime"] + " UTC",
         "Sent Amount": "", "Sent Currency": "",
@@ -460,6 +490,17 @@ def koinly_format(items, state):
         fee_rows = [r for r in group if is_fee_row(r)]
         normal_rows = [r for r in group if not is_fee_row(r)]
         datarows = [build_koinly_row(r, state) for r in normal_rows]
+        # a tx with exactly one outgoing and one incoming leg is a trade (swap, NFT mint,
+        # deposit-for-receipt-token, protocol migration). emit it as a single koinly row so
+        # koinly treats it as an Exchange - it won't auto-merge legs it can't price (NULLx/NFTx)
+        if len(datarows) == 2:
+            sent = next((d for d in datarows if d["Sent Currency"] and not d["Received Currency"]), None)
+            received = next((d for d in datarows if d["Received Currency"] and not d["Sent Currency"]), None)
+            if sent is not None and received is not None and sent["Sent Currency"] != received["Received Currency"]:
+                sent["Received Amount"] = received["Received Amount"]
+                sent["Received Currency"] = received["Received Currency"]
+                sent["Description"] = (sent["Description"] + " | " + received["Description"]).strip(" |")
+                datarows = [sent]
         if fee_rows:
             # sum per currency (a paymaster tx could emit both an ETH and an STRK fee)
             fees_by_currency = {}
@@ -511,11 +552,12 @@ def undo_last_run():
     entry = log["runs"].pop()
     state = load_placeholder_map()
     for placeholder, key in entry.get("new_placeholders", {}).items():
-        kind = "lp" if placeholder.startswith("LP") else "nft"
+        kind = "lp" if placeholder.startswith("LP") else ("null" if placeholder.startswith("NULL") else "nft")
         state[kind].pop(key, None)
     if "counters_before" in entry:
         state["next_nft"] = entry["counters_before"]["next_nft"]
         state["next_lp"] = entry["counters_before"]["next_lp"]
+        state["next_null"] = entry["counters_before"].get("next_null", state["next_null"])
     save_placeholder_map(state)
     save_run_log(log)
     print("undid run of " + entry["date_run"] + " for wallet " + entry["wallet"])
@@ -658,14 +700,14 @@ def export_wallet(wallet_input):
                              "Fee Amount", "Fee Currency", "Net Worth Amount", "Net Worth Currency",
                              "Label", "Description", "TxHash"]
             state = load_placeholder_map()
-            counters_before = {"next_nft": state["next_nft"], "next_lp": state["next_lp"]}
-            keys_before = {"nft": set(state["nft"]), "lp": set(state["lp"])}
+            counters_before = {"next_nft": state["next_nft"], "next_lp": state["next_lp"], "next_null": state["next_null"]}
+            keys_before = {"nft": set(state["nft"]), "lp": set(state["lp"]), "null": set(state["null"])}
             rows_out = koinly_format(page_data, state)
             save_placeholder_map(state)
             out_fields = koinly_fields
             log_entry["counters_before"] = counters_before
-            log_entry["counters_after"] = {"next_nft": state["next_nft"], "next_lp": state["next_lp"]}
-            log_entry["new_placeholders"] = {state[kind][key]: key for kind in ("nft", "lp")
+            log_entry["counters_after"] = {"next_nft": state["next_nft"], "next_lp": state["next_lp"], "next_null": state["next_null"]}
+            log_entry["new_placeholders"] = {state[kind][key]: key for kind in ("nft", "lp", "null")
                                              for key in state[kind] if key not in keys_before[kind]}
         elif fmt == "standard":
             rows_out, out_fields = page_data, fields
